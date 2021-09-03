@@ -53,7 +53,7 @@ func main() {
 
 	// load .env file if it exists
 
-	err := godotenv.Load("example.env")
+	err := godotenv.Load(".env")
 	if err != nil {
 		log.Fatal("Error loading .env file")
 	}
