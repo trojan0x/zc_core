@@ -38,7 +38,8 @@ func Router(Server *socketio.Server) *mux.Router {
 	//r.HandleFunc("/marketplace/plugins/{id}", marketplace.GetOneApprovedPlugin).Methods("GET")
 	//r.HandleFunc("/marketplace/install", marketplace.InstallPluginToOrg).Methods("POST")
 	r.HandleFunc("/users", user.Create).Methods("POST")
-	
+	r.HandleFunc("/users/verify", user.Verify).Methods("GET")
+
 	http.Handle("/", r)
 
 	return r
@@ -52,7 +53,7 @@ func main() {
 
 	// load .env file if it exists
 
-	err := godotenv.Load(".env")
+	err := godotenv.Load("example.env")
 	if err != nil {
 		log.Fatal("Error loading .env file")
 	}
