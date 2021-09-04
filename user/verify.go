@@ -1,36 +1,97 @@
 package user
 
 import (
-	"errors"
+	"encoding/json"
 	"fmt"
+	_ "log"
 	"net/http"
+	"os"
+	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"zuri.chat/zccore/utils"
+	jwt "github.com/golang-jwt/jwt"
+	"github.com/golang-jwt/jwt/request"
+	_ "github.com/gorilla/mux"
 )
 
-func verify(response http.ResponseWriter, request *http.Request) {
-	response.Header().Add("content-type", "application/json")
-	user_collection := "users"
-	var user User
+var secretKey = []byte(os.Getenv("SESSION_SECRET"))
+var users = map[string]string{"naren": "passme", "admin": "password"}
 
-	err := utils.ParseJsonFromRequest(request, &user)
+// Response is a representation of JSON response for JWT
+type Response struct {
+	Token  string `json:"token"`
+	Status string `json:"status"`
+}
+
+// HealthcheckHandler returns the date and time
+func HealthcheckHandler(w http.ResponseWriter, r *http.Request) {
+	tokenString, err := request.HeaderExtractor{"access_token"}.ExtractToken(r)
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// Don't forget to validate the alg is what you expect:
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+		}
+
+		// hmacSampleSecret is a []byte containing your secret, e.g. []byte("my_secret_key")
+		return secretKey, nil
+	})
 	if err != nil {
-		utils.GetError(err, http.StatusUnprocessableEntity, response)
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte("Access Denied; Please check the access token"))
 		return
 	}
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		// If token is valid
+		response := make(map[string]string)
+		// response["user"] = claims["username"]
+		response["time"] = time.Now().String()
+		response["user"] = claims["username"].(string)
+		responseJSON, _ := json.Marshal(response)
+		w.Write(responseJSON)
+	} else {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(err.Error()))
+	}
+}
 
-	if !utils.IsValidEmail(user.Email) {
-		utils.GetError(errors.New("email address is not valid"), http.StatusBadRequest, response)
+// Validate user credentials
+func getTokenHandler(w http.ResponseWriter, r *http.Request) {
+	err := r.ParseForm()
+	if err != nil {
+		http.Error(w, "Please pass the data as URL form encoded", http.StatusBadRequest)
 		return
 	}
+	username := r.PostForm.Get("username")
+	password := r.PostForm.Get("password")
+	if originalPassword, ok := users[username]; ok {
+		if password == originalPassword {
+			// Create a claims map
+			claims := jwt.MapClaims{
+				"username":  username,
+				"ExpiresAt": 15000,
+				"IssuedAt":  time.Now().Unix(),
+			}
+			token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+			tokenString, err := token.SignedString(secretKey)
+			if err != nil {
+				w.WriteHeader(http.StatusBadGateway)
+				w.Write([]byte(err.Error()))
+			}
+			response := Response{Token: tokenString, Status: "success"}
+			responseJSON, _ := json.Marshal(response)
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(responseJSON)
 
-	// confirm if user_email exists
-	result, _ := utils.GetMongoDbDoc(user_collection, bson.M{"email": user.Email})
-	if result != nil {
-		fmt.Printf("users with email %s exists!", user.Email)
-		utils.GetError(errors.New("operation failed"), http.StatusBadRequest, response)
+		} else {
+			http.Error(w, "Invalid Credentials", http.StatusUnauthorized)
+			return
+		}
+	} else {
+		http.Error(w, "User is not found", http.StatusNotFound)
 		return
 	}
-
+}
+func TokenHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
 }
